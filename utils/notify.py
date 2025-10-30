@@ -1,6 +1,5 @@
 import os
 import smtplib
-from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Literal
 
@@ -12,25 +11,27 @@ class NotificationKit:
 		self.email_user: str = os.getenv('EMAIL_USER', '')
 		self.email_pass: str = os.getenv('EMAIL_PASS', '')
 		self.email_to: str = os.getenv('EMAIL_TO', '')
+		self.smtp_server: str = os.getenv('CUSTOM_SMTP_SERVER', '')
 		self.pushplus_token = os.getenv('PUSHPLUS_TOKEN')
 		self.server_push_key = os.getenv('SERVERPUSHKEY')
 		self.dingding_webhook = os.getenv('DINGDING_WEBHOOK')
 		self.feishu_webhook = os.getenv('FEISHU_WEBHOOK')
 		self.weixin_webhook = os.getenv('WEIXIN_WEBHOOK')
+		self.telegram_bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
+		self.telegram_chat_id = os.getenv('TELEGRAM_CHAT_ID')
 
 	def send_email(self, title: str, content: str, msg_type: Literal['text', 'html'] = 'text'):
 		if not self.email_user or not self.email_pass or not self.email_to:
 			raise ValueError('Email configuration not set')
 
-		msg = MIMEMultipart()
+		# MIMEText 需要 'plain' 或 'html'，而不是 'text'
+		mime_subtype = 'plain' if msg_type == 'text' else 'html'
+		msg = MIMEText(content, mime_subtype, 'utf-8')
 		msg['From'] = f'AnyRouter Assistant <{self.email_user}>'
 		msg['To'] = self.email_to
 		msg['Subject'] = title
 
-		body = MIMEText(content, msg_type, 'utf-8')
-		msg.attach(body)
-
-		smtp_server = f'smtp.{self.email_user.split("@")[1]}'
+		smtp_server = self.smtp_server if self.smtp_server else f'smtp.{self.email_user.split("@")[1]}'
 		with smtplib.SMTP_SSL(smtp_server, 465) as server:
 			server.login(self.email_user, self.email_pass)
 			server.send_message(msg)
@@ -81,6 +82,16 @@ class NotificationKit:
 		with httpx.Client(timeout=30.0) as client:
 			client.post(self.weixin_webhook, json=data)
 
+	def send_telegram(self, title: str, content: str):
+		if not self.telegram_bot_token or not self.telegram_chat_id:
+			raise ValueError('Telegram Bot Token or Chat ID not configured')
+
+		message = f'<b>{title}</b>\n\n{content}'
+		data = {'chat_id': self.telegram_chat_id, 'text': message, 'parse_mode': 'HTML'}
+		url = f'https://api.telegram.org/bot{self.telegram_bot_token}/sendMessage'
+		with httpx.Client(timeout=30.0) as client:
+			client.post(url, json=data)
+
 	def push_message(self, title: str, content: str, msg_type: Literal['text', 'html'] = 'text'):
 		notifications = [
 			('Email', lambda: self.send_email(title, content, msg_type)),
@@ -89,6 +100,7 @@ class NotificationKit:
 			('DingTalk', lambda: self.send_dingtalk(title, content)),
 			('Feishu', lambda: self.send_feishu(title, content)),
 			('WeChat Work', lambda: self.send_wecom(title, content)),
+			('Telegram', lambda: self.send_telegram(title, content)),
 		]
 
 		for name, func in notifications:
